@@ -52,9 +52,6 @@ func do_movement(delta):
 		velocity = move * MAX_SPEED
 	
 	position += velocity*delta
-	
-	if prev_position != position and MultiplayerManager.connected:
-		MultiplayerManager.dog_update_position.rpc(position)
 
 func change_sprite_by_velocity():
 	if velocity.x != 0:
@@ -93,18 +90,16 @@ func _physics_process(delta):
 		Global.current_level.y += -1
 		position.y = 1079
 	if Global.current_level != old_level:
-		get_tree().call_group("paintbursts", "queue_free")
-		Global.paint_target.clear_paint_diff()
-		MultiplayerManager.client.me.position = position
-		MultiplayerManager.client.set_loading(true)
-		MultiplayerManager.request_move_to_level.rpc_id(1, MultiplayerManager.client.me, Global.current_level)
-		get_tree().paused = true
+		MultiplayerManager.client.change_level(null, position)
 		return
 	position = position.clamp(Vector2.ZERO, Vector2(1920, 1080))
+	
 	
 	if animation.animation_name == "idle" and brush.prev_drawing and brush.pos < position != facing:
 		facing = brush.pos < position
 	
+	if prev_position != position and MultiplayerManager.connected:
+		MultiplayerManager.dog_update_position.rpc(position)
 	MultiplayerManager.client.me.position = position
 
 func _ready():
