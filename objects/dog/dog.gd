@@ -70,7 +70,8 @@ func change_sprite_by_velocity():
 			animation.play_if_not("run")
 
 func _physics_process(delta):
-	do_movement(delta)
+	if !Global.chat:
+		do_movement(delta)
 	
 	z_index = int(global_position.y)
 	
@@ -110,3 +111,24 @@ func _ready():
 	get_node("..").add_child.call_deferred(brush)
 	animation.set_dog_dict(Global.dog_dict)
 	$username.text = Global.username
+	get_authnames()
+	Settings.connect("settings_changed", settings_changed)
+
+func get_avatar(discord_user):
+	$Auth/Profile.texture = ImageTexture.create_from_image(await Global.get_discord_profile(discord_user))
+
+func get_authnames():
+	if MultiplayerManager.uid == 0 or MultiplayerManager.auth_type == null: return
+	if Settings.show_auth_names:
+		$Auth.visible = true
+		$Auth/AuthName.text = MultiplayerManager.authenticated_players[MultiplayerManager.uid].username
+		if Settings.show_avatars_level:
+			get_avatar(MultiplayerManager.authenticated_players[MultiplayerManager.uid])
+		else:
+			$Auth/Profile.texture = null
+	else:
+		$Auth.visible = false
+
+func settings_changed():
+	print("changed")
+	get_authnames()

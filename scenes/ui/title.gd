@@ -11,7 +11,7 @@ var paintset = false
 
 func load_custom_paint():
 	if Settings.title_paint_custom_enabled and Settings.title_paint_custom:
-		$paint.paint = MultiplayerManager.decompress_paint(Marshalls.base64_to_raw(Settings.title_paint_custom), Settings.title_paint_custom_size)
+		$paint.paint.array = MultiplayerManager.decompress_paint(Marshalls.base64_to_raw(Settings.title_paint_custom), Settings.title_paint_custom_size)
 		var pal = []
 		for i in Settings.title_paint_custom_palette:
 			pal.append(Color(i))
@@ -22,16 +22,23 @@ func load_custom_paint():
 
 func _ready():
 	load_custom_paint()
+	get_tree().paused = false
 	Global.pause_enable = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	ipenter.text = "%s:%d" % [MultiplayerManager.DEFAULT_IP, MultiplayerManager.DEFAULT_PORT]
 	status.text = MultiplayerManager.connection_status
 	usernameenter.text = Global.username
+	
+	ipenter.text = Settings.last_server_ip
+	protocolselect.select(0)
+	if Settings.last_server_protocol == "wss://":
+		protocolselect.select(1)
+	
 	if OS.has_feature("web"):
 		var search = JavaScriptBridge.eval("window.location.search")
 		search = search.lstrip("?").split("&")
 		for i in search:
-			i = i.to_lower().split("=")
+			i = i.split("=")
+			i[0] = i[0].to_lower()
 			if i[0] == "ip":
 				ipenter.text = i[1]
 			elif i[0] == "secure":
@@ -54,6 +61,7 @@ func _process(_delta):
 		submenu = null
 
 func _on_join_button_pressed():
+	Global.current_level = Vector3.ZERO
 	MultiplayerManager.protocol = protocolselect.text
 	if not MultiplayerManager.get_ip_port(ipenter.text):
 		iptitle.text = "IP - Invalid:"
@@ -61,7 +69,6 @@ func _on_join_button_pressed():
 	if Global.username != usernameenter.text.strip_edges():
 		Global.username = usernameenter.text.strip_edges()
 		Global.save_username()
-	get_tree().change_scene_to_file("res://scenes/level.tscn")
 	MultiplayerManager.start()
 
 func _on_settings_button_pressed():

@@ -22,6 +22,10 @@ const TIMEOUT_TIME = 10.0
 var timeout = 0.0
 var timeout_enable = false
 
+var auth_error: String = ""
+var client_id
+var server_player = {"dog": null, "username": null}
+
 # Signal
 
 func on_player_disconnected(id):
@@ -33,11 +37,12 @@ func on_player_disconnected(id):
 		level_puppets.erase(id)
 
 func on_connected_ok():
-	me.position = dog.position
+	me.position = Vector2.ZERO
 	me.username = Global.username
-	MultiplayerManager.request_move_to_level.rpc_id(1, me, Global.current_level)
 
 func on_connected_fail():
+	timeout_enable = false
+	get_tree().paused = false
 	set_loading(false)
 	get_tree().change_scene_to_file("res://scenes/ui/title.tscn")
 
@@ -59,6 +64,7 @@ func _process(delta):
 		multiplayer.multiplayer_peer.close()
 		MultiplayerManager.connection_status = "Connection Timed Out"
 		set_loading(false)
+		timeout_enable = false
 		get_tree().change_scene_to_file("res://scenes/ui/title.tscn")
 
 # Util
@@ -85,6 +91,8 @@ func add_puppet(pid, userinfo):
 	level_puppets[pid] = puppet
 	level_scene.add_child(puppet)
 	puppet.get_node("username").text = userinfo.username
+	puppet.discord_user = MultiplayerManager.authenticated_players[pid]
+	puppet.update_auth()
 	puppet.brush_position = userinfo.brush.position
 	puppet.brush_drawing = userinfo.brush.drawing
 	puppet.brush_color = userinfo.brush.color
@@ -95,6 +103,22 @@ func add_puppet(pid, userinfo):
 	puppet.animation.set_dog_dict(userinfo.dog)
 	puppet.brush.handle.modulate = userinfo.dog.color.brush_handle
 	puppet.playerstatus = userinfo.playerstatus
+
+func get_server_auth_tokens(ip):
+	if FileAccess.file_exists("user://auth.json"):
+		var auth_tokens = JSON.parse_string(FileAccess.open("user://auth.json", FileAccess.READ).get_line())
+		if ip in auth_tokens: # another method of matching servers?
+			return auth_tokens[ip]
+	return null
+
+func set_server_auth_tokens(ip, tokens):
+	var auth_tokens = {}
+	if FileAccess.file_exists("user://auth.json"):
+		auth_tokens = JSON.parse_string(FileAccess.open("user://auth.json", FileAccess.READ).get_line())
+		if not auth_tokens:
+			auth_tokens = {}
+	auth_tokens[ip] = tokens
+	FileAccess.open("user://auth.json", FileAccess.WRITE_READ).store_string(JSON.stringify(auth_tokens))
 
 # for other nodes
 
@@ -110,6 +134,14 @@ func change_level(level, position):
 	MultiplayerManager.request_move_to_level.rpc_id(1, me, Global.current_level)
 	get_tree().paused = true
 
+func get_ip():
+	return "%s%s:%s" % [MultiplayerManager.protocol, MultiplayerManager.ip, MultiplayerManager.port]
+
+func enter_level():
+	get_tree().change_scene_to_file("res://scenes/level.tscn")
+	await get_tree().node_added
+	MultiplayerManager.request_move_to_level.rpc_id(1, me, Global.current_level)
+
 # Start
 
 func start():
@@ -123,8 +155,67 @@ func start():
 		print(error)
 	multiplayer.multiplayer_peer = peer
 	print("Connection Started")
+	if MultiplayerManager.protocol == "wss://" and MultiplayerManager.port == MultiplayerManager.DEFAULT_WSS_PORT:
+		Settings.last_server_ip = MultiplayerManager.ip
+	elif MultiplayerManager.protocol == "ws://" and MultiplayerManager.port == MultiplayerManager.DEFAULT_PORT:
+		Settings.last_server_ip = MultiplayerManager.ip
+	else:
+		Settings.last_server_ip = "%s:%d" % [MultiplayerManager.ip, MultiplayerManager.port]
+	Settings.last_server_protocol = MultiplayerManager.protocol
+	Settings.save()
 
 # RPC
+
+## Auth
+
+func welcome(_pid):
+	get_tree().change_scene_to_file("res://scenes/level.tscn")
+	await get_tree().node_added
+	MultiplayerManager.request_move_to_level.rpc_id(1, me, Global.current_level)
+	MultiplayerManager.auth_type = null
+	
+func request_auth(_pid, auth_type, server_client_id):
+	if auth_type != null and not (MultiplayerManager.protocol == "wss://" or Settings.allow_insecure_server_auth or OS.is_debug_build()):
+		MultiplayerManager.connection_status = "Insecure Server"
+		reconnect = false
+		multiplayer.multiplayer_peer.close()
+		return
+	client_id = server_client_id
+	timeout_enable = false
+	MultiplayerManager.auth_type = auth_type
+	if auth_type == "discord":
+		var tokens = get_server_auth_tokens(get_ip())
+		if tokens:
+			# tokens = {"access_token": "a", "refresh_token": "a"} # invalid token test
+			MultiplayerManager.auth_login.rpc_id(1, tokens)
+		else:
+			get_tree().change_scene_to_file("res://scenes/ui/login.tscn")
+
+func auth_logged_in(_pid, tokens, userinfo, authenticated, prev_users):
+	MultiplayerManager.authenticated_players = authenticated
+	set_server_auth_tokens(get_ip(), tokens)
+	print("Logged in as %s" % userinfo.username)
+	var login = get_node_or_null("/root/Login")
+	if not login:
+		get_tree().change_scene_to_file("res://scenes/ui/login.tscn")
+		await get_tree().node_added
+		login = get_node("/root/Login")
+		await login.ready
+	if prev_users and prev_users.dog:
+		login.server_user(prev_users.dog, prev_users.username)
+	login.logged_in()
+
+func auth_failed(_pid, error_message):
+	set_server_auth_tokens(get_ip(), null)
+	auth_error = error_message
+	print(auth_error)
+	var login = get_node("/root/Login")
+	if login:
+		login.update_error(error_message)
+	else:
+		get_tree().change_scene_to_file("res://scenes/ui/login.tscn")
+
+## Paint
 
 func draw_diff(_pid, size, diff, rect, level, user):
 	diff = MultiplayerManager.decode_diff(diff, size)
@@ -136,10 +227,12 @@ func draw_diff(_pid, size, diff, rect, level, user):
 func recieve_level_paint(_pid, newpaint, size, level, palette):
 	if level == Global.current_level:
 		Global.paint_target.clear_paint()
-		Global.paint_target.paint = MultiplayerManager.decompress_paint(newpaint, size)
+		Global.paint_target.paint.array = MultiplayerManager.decompress_paint(newpaint, size)
 		set_palette(_pid, palette, level)
 	elif player_list:
 		player_list.set_paint(level, MultiplayerManager.decompress_paint(newpaint, size), palette)
+
+## Puppets
 
 func kill_puppets(_pid):
 	level_puppets = {}
@@ -148,6 +241,8 @@ func kill_puppets(_pid):
 func recieve_puppet(_pid, puppet, userinfo):
 	if puppet != MultiplayerManager.uid:
 		add_puppet(puppet, userinfo)
+
+## Level
 
 func complete_level_move(_pid, level):
 	timeout_enable = false
@@ -176,6 +271,8 @@ func set_palette(_pid, palette, level):
 		dog.brush.color_index = min(dog.brush.color_index, len(Global.palette)-1)
 	elif player_list:
 		player_list.update_palette(level, palette)
+
+## Dogs
 
 func brush_update(pid, position, drawing, color, size):
 	if pid in level_puppets:
@@ -219,6 +316,8 @@ func dog_update_playerstatus(pid, playerstatus):
 			level_puppets[pid].animation.speed_scale = 0
 		else:
 			level_puppets[pid].animation.speed_scale = 1
+
+## Chat
 
 func chat_message(_pid, username, level, message):
 	if level == Global.current_level:

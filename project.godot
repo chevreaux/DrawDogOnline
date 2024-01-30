@@ -12,7 +12,7 @@ config_version=5
 
 config/name="Draw Dog Online"
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.1", "GL Compatibility")
+config/features=PackedStringArray("4.2", "GL Compatibility")
 boot_splash/image="res://splash.png"
 boot_splash/fullsize=false
 config/icon="res://icon.svg"
@@ -26,9 +26,9 @@ MultiplayerManager="*res://scripts/Autoload/MultiplayerManager.gd"
 
 [debug]
 
-multirun/number_of_windows=5
+multirun/number_of_windows=2
 multirun/add_custom_args=true
-multirun/window_args=["join-server 127.0.0.1 --winpos 0,0 --winsize 959,511", "server-start default", "join-server 127.0.0.1 --winpos 960,0 --winsize 959,511", "join-server 127.0.0.1 --winpos 0,540 --winsize 959,511", "join-server 127.0.0.1 --winpos 960,540 --winsize 959,511"]
+multirun/window_args=["join-server 127.0.0.1 --winpos 960,0 --winsize 959,511", "server-start default --authtype discord", "join-server 127.0.0.1 --winpos 0,0 --winsize 959,511", "join-server 127.0.0.1 --winpos 0,540 --winsize 959,511", "join-server 127.0.0.1 --winpos 960,540 --winsize 959,511"]
 
 [display]
 
@@ -39,9 +39,23 @@ window/size/window_width_override=1280
 window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 
+[editor]
+
+run/main_run_args="join-server 127.0.0.1 --winpos 0,0 --winsize 959,511"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/multirun/plugin.cfg")
+
+[file_customization]
+
+folder_colors={
+"res://assets/": "red",
+"res://data/": "gray",
+"res://objects/": "blue",
+"res://scenes/": "pink",
+"res://scripts/": "purple"
+}
 
 [input]
 

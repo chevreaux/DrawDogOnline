@@ -51,9 +51,11 @@ var paint_res: int = 12
 
 var current_level = Vector3(0, 0, 0)
 
+var chat = false
 var paintable = true
 var screenshot = null
-var filedialog = null
+
+const PROFILE_IMAGE_SIZE = 160 # width & height in pixels
 
 func load_username():
 	if FileAccess.file_exists("user://username.txt"):
@@ -84,22 +86,45 @@ func save_dog():
 			outdog.color[i] = "#" + outdog.color[i].to_html(false)
 	file.store_line(JSON.stringify(outdog))
 
-func cancel_screenshotting():
-	filedialog.queue_free()
-	screenshot = null
-	paintable = true
-	get_tree().paused = false
-	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
-
-func save_screenshot(path):
+func save_screenshot(status: bool, paths: PackedStringArray, _selected_filter_index: int):
+	if not status: # Cancelled:
+		screenshot = null
+		return
+	var path = paths[0]
+	if not path.ends_with(".png"):
+		path = path + ".png"
 	screenshot.save_png(path)
 	Settings.last_save_location = "/".join(path.split("/").slice(0, -1)) + "/"
 	Settings.save()
-	filedialog.queue_free()
 	screenshot = null
-	get_tree().paused = false
-	paintable = true
-	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+
+func get_discord_profile(discord_user):
+	var http_req = HTTPRequest.new()
+	add_child(http_req)
+	
+	var discord_id = discord_user.id
+	var avatar = discord_user.avatar
+
+	var image
+	if FileAccess.file_exists("user://profile_cache/%s.png" % avatar):
+		image = Image.new()
+		var file = FileAccess.open("user://profile_cache/%s.png" % avatar, FileAccess.READ)
+		image.load_png_from_buffer(file.get_buffer(file.get_length()))
+		return image
+
+	http_req.request("https://cdn.discordapp.com/avatars/%s/%s.png?size=%s" % [discord_id, avatar, PROFILE_IMAGE_SIZE])
+
+	var response = await http_req.request_completed
+
+	if response[1] != 200:
+		return # can't get it, whatever
+	if not DirAccess.dir_exists_absolute("user://profile_cache"): DirAccess.make_dir_absolute("user://profile_cache")
+	FileAccess.open("user://profile_cache/%s.png" % avatar, FileAccess.WRITE_READ).store_buffer(response[3])
+	image = Image.new()
+	image.load_png_from_buffer(response[3])
+	http_req.queue_free()
+	return image
+
 
 func _process(delta):
 	randomize()
@@ -120,26 +145,7 @@ func _process(delta):
 			if OS.has_feature("web"):
 				JavaScriptBridge.download_buffer(screenshot.save_png_to_buffer(), "paint.png", "image/png")
 			else:
-				get_tree().paused = true
-				paintable = false
-				filedialog = FileDialog.new()
-				
-				filedialog.exclusive = true
-				var cornerdist = Vector2i(1920, 1080)/10
-				filedialog.position = cornerdist
-				filedialog.size = Vector2i(1920, 1080)-cornerdist*2
-				
-				filedialog.access = FileDialog.ACCESS_FILESYSTEM
-				filedialog.current_dir = Settings.last_save_location
-				
-				filedialog.add_filter("*.png", "PNG File")
-				filedialog.title = "Save Paint Screenshot"
-				
-				add_child(filedialog)
-				filedialog.visible = true
-				filedialog.connect("canceled", cancel_screenshotting)
-				filedialog.connect("file_selected", save_screenshot)
-				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+				DisplayServer.file_dialog_show("Save Paint Screenshot", Settings.last_save_location, "paint.png", false, DisplayServer.FILE_DIALOG_MODE_SAVE_FILE, PackedStringArray(["*.png;PNG Image"]), save_screenshot)
 
 func _ready():
 	process_mode = PROCESS_MODE_ALWAYS
